@@ -47,11 +47,65 @@ typedef enum
     RESET_CMD       =   0xFE,
 } ADS1256_Command;
 
+/* ADS1256 Gain Settings */
+typedef enum
+{
+    GAIN_1          =   0,
+    GAIN_2,
+    GAIN_4,
+    GAIN_8,
+    GAIN_16,
+    GAIN_32,
+    GAIN_64
+} ADS1256_Gain;
+
+typedef enum
+{
+    DRATE_30K_SPS   =   0xF0,
+    DRATE_15K_SPS   =   0xE0,
+    DRATE_7_5K_SPS  =   0xD0,
+    DRATE_3_75k_SPS =   0xC0,
+    DRATE_2K_SPS    =   0xB0,
+    DRATE_1K_SPS    =   0xA1,
+    DRATE_500_SPS   =   0x92,
+    DRATE_100_SPS   =   0x82,
+    DRATE_60_SPS    =   0x72,
+    DRATE_50_SPS    =   0x63,
+    DRATE_30_SPS    =   0x53,
+    DRATE_25_SPS    =   0x43,
+    DRATE_15_SPS    =   0x33,
+    DRATE_10_SPS    =   0x23,
+    DRATE_5_SPS     =   0x13,
+    DRATE_2_5_SPS   =   0x03
+} ADS1256_Data_Rate;
+
+typedef enum
+{
+    CHANNEL_AIN0    =   0x00,
+    CHANNEL_AIN1,
+    CHANNEL_AIN2,
+    CHANNEL_AIN3,
+    CHANNEL_AIN4,
+    CHANNEL_AIN5,
+    CHANNEL_AIN6,
+    CHANNEL_AIN7,
+    CHANNEL_AINCOM,
+} ADS1256_Channel;
+
+typedef enum
+{
+    MODE_SINGLE_ENDED = 1,
+    MODE_DIFF,
+} ADS1256_Mode;
+
 /* ADS1256 Sensor Struct */
 typedef struct
 { 
     // STM32F7 HAL specific handler for SPI communication
     SPI_HandleTypeDef *spiHandle;
+
+    // Current ADC mode of operation
+    ADS1256_Mode mode;
 
     // Port where the chip select GPIO pin is located
     GPIO_TypeDef *csPort;
@@ -67,9 +121,10 @@ typedef struct
 } ADS1256;
 
 HAL_StatusTypeDef ADS1256_Init(ADS1256 *ads, SPI_HandleTypeDef *spiHandle, GPIO_TypeDef *csPort, uint16_t csPin, GPIO_TypeDef *rdyPort, uint16_t rdyPin);
+HAL_StatusTypeDef ADS1256_Set_Mode(ADS1256 *ads, ADS1256_Mode mode);
+HAL_StatusTypeDef ADS1256_Set_Channel(ADS1256 *ads, ADS1256_Channel pChannel);
 HAL_StatusTypeDef ADS1256_Send_Command(ADS1256 *ads, ADS1256_Command command);
 HAL_StatusTypeDef ADS1256_Register_Read(ADS1256 *ads, ADS1256_Register regAddr, uint8_t *inBuffer);
 HAL_StatusTypeDef ADS1256_Register_Write(ADS1256 *ads, ADS1256_Register regAddr, uint8_t data);
-
 
 #endif
