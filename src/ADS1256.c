@@ -71,104 +71,6 @@ HAL_StatusTypeDef ADS1256_Init(ADS1256 *ads, SPI_HandleTypeDef *spiHandle, GPIO_
     status = ADS1256_Set_Channel(ads, CHANNEL_AIN0);
     if (status != HAL_OK) return status;
 
-    // TODO: Replace this with an ADS1256_Self_Calibration function
-    // call as we need to wait until DRDY goes low.
-    // Perform a full self-calibration (gain and offset cal)
-    // status = ADS1256_Send_Command(ads, SELFCAL_CMD);
-    return status;
-}
-
-/**
- *  HAL_StatusTypeDef ADS1256_Set_Mode(ADS1256 *ads, ADS1256_Mode mode)
- * 
- *  Change the current operating mode of the ADS1256 to one specified in
- *  the ADS1256_Mode enum (single-ended or differential). If the user is changing 
- *  from differential to signle-ended mode, then the negative input channel
- *  is automatically changed to AINCOM.
- * 
- *  Returns a HAL_StatusTypeDef.
-*/
-HAL_StatusTypeDef ADS1256_Set_Mode(ADS1256 *ads, ADS1256_Mode mode)
-{
-    HAL_StatusTypeDef status = HAL_OK;
-    if (ads->mode != mode)
-    {
-        ads->mode = mode;
-        if (mode == MODE_SINGLE_ENDED)
-        {
-            // Change the ads' mode and set the negative input channel to AINCOM
-            // while preserving the current positive input channel
-            uint8_t mux = 0x00;
-            status = ADS1256_Register_Read(ads, MUX_REG, &mux);
-            status = ADS1256_Register_Write(ads, MUX_REG, mux & 0x8);
-        }
-    }
-
-    return status;
-}
-
-/**
- *  HAL_StatusTypeDef ADS1256_Set_Channel(ADS1256 *ads, ADS1256_Channel pChannel)
- *  
- *  Change the positive analog input channel of the ADS1256 to pChannel. If the ADS
- *  is configured in differential input mode, then the corresponding negative input channel
- *  will be automatically selected, if one exists. If the ADS1256 is configered in single-ended
- *  input mode, then the AINCOM channel will be selected as the negative input channel.
- * 
- *  Returns a HAL_StatusTypeDef.
-*/
-HAL_StatusTypeDef ADS1256_Set_Channel(ADS1256 *ads, ADS1256_Channel pChannel)
-{
-    HAL_StatusTypeDef status;
-
-    // If the ADC is configured in differential mode, then automatically
-    // set its negative input channel to the adjacent analog channel, otherwise
-    // set the negative input channel to AINCOM.
-    uint8_t nChannel;
-    if (ads->mode == MODE_DIFF)
-    {
-        // There are only 4 differential channels, and they are
-        //  AIN0 - AIN1
-        //  AIN2 - AIN3
-        //  AIN4 - AIN5
-        //  AIN6 - AIN7
-        // So we must first check to make sure pChannel is 0, 2, 4, or 6
-        switch (pChannel)
-        {
-        case CHANNEL_AIN0:
-            nChannel = CHANNEL_AIN1;
-            break;
-        case CHANNEL_AIN2:
-            nChannel = CHANNEL_AIN3;
-            break;
-        case CHANNEL_AIN4:
-            nChannel = CHANNEL_AIN5;
-            break;
-        case CHANNEL_AIN6:
-            nChannel = CHANNEL_AIN7;
-            break;
-        default:
-            // If the user has entered a channel that can not be used
-            // peroperly in differential mode, return an error
-            return HAL_ERROR;
-        }
-    }
-    else
-    {
-        nChannel = CHANNEL_AINCOM;
-    }
-
-    // Change the channels in the MUX register
-    status = ADS1256_Register_Write(ads, MUX_REG, (pChannel << 4) | nChannel);
-    if (status != HAL_OK) return status;
-
-    // Issue a SYNC/WAKEUP command to restart conversion process
-    status = ADS1256_Send_Command(ads, SYNC_CMD);
-    if (status != HAL_OK) return status;
-    DWT_Delay_us(4);
-    status = ADS1256_Send_Command(ads, WAKEUP_CMD);
-    if (status != HAL_OK) return status;
-
     return status;
 }
 
@@ -315,6 +217,121 @@ __attribute__((optimize("-Ofast"))) HAL_StatusTypeDef ADS1256_Register_Write(ADS
 
     // Bring the chip select line high
     ads->csPort->BSRR = ads->csPin;
+
+    return status;
+}
+
+/**
+ *  HAL_StatusTypeDef ADS1256_Set_Mode(ADS1256 *ads, ADS1256_Mode mode)
+ * 
+ *  Change the current operating mode of the ADS1256 to one specified in
+ *  the ADS1256_Mode enum (single-ended or differential). If the user is changing 
+ *  from differential to signle-ended mode, then the negative input channel
+ *  is automatically changed to AINCOM.
+ * 
+ *  Returns a HAL_StatusTypeDef.
+*/
+HAL_StatusTypeDef ADS1256_Set_Mode(ADS1256 *ads, ADS1256_Mode mode)
+{
+    HAL_StatusTypeDef status = HAL_OK;
+    if (ads->mode != mode)
+    {
+        ads->mode = mode;
+        if (mode == MODE_SINGLE_ENDED)
+        {
+            // Change the ads' mode and set the negative input channel to AINCOM
+            // while preserving the current positive input channel
+            uint8_t mux = 0x00;
+            status = ADS1256_Register_Read(ads, MUX_REG, &mux);
+            status = ADS1256_Register_Write(ads, MUX_REG, mux & 0x8);
+        }
+    }
+
+    return status;
+}
+
+/**
+ *  HAL_StatusTypeDef ADS1256_Set_Channel(ADS1256 *ads, ADS1256_Channel pChannel)
+ *  
+ *  Change the positive analog input channel of the ADS1256 to pChannel. If the ADS
+ *  is configured in differential input mode, then the corresponding negative input channel
+ *  will be automatically selected, if one exists. If the ADS1256 is configered in single-ended
+ *  input mode, then the AINCOM channel will be selected as the negative input channel.
+ * 
+ *  Returns a HAL_StatusTypeDef.
+*/
+HAL_StatusTypeDef ADS1256_Set_Channel(ADS1256 *ads, ADS1256_Channel pChannel)
+{
+    HAL_StatusTypeDef status;
+
+    // If the ADC is configured in differential mode, then automatically
+    // set its negative input channel to the adjacent analog channel, otherwise
+    // set the negative input channel to AINCOM.
+    uint8_t nChannel;
+    if (ads->mode == MODE_DIFF)
+    {
+        // There are only 4 differential channels, and they are
+        //  AIN0 - AIN1
+        //  AIN2 - AIN3
+        //  AIN4 - AIN5
+        //  AIN6 - AIN7
+        // So we must first check to make sure pChannel is 0, 2, 4, or 6
+        switch (pChannel)
+        {
+        case CHANNEL_AIN0:
+            nChannel = CHANNEL_AIN1;
+            break;
+        case CHANNEL_AIN2:
+            nChannel = CHANNEL_AIN3;
+            break;
+        case CHANNEL_AIN4:
+            nChannel = CHANNEL_AIN5;
+            break;
+        case CHANNEL_AIN6:
+            nChannel = CHANNEL_AIN7;
+            break;
+        default:
+            // If the user has entered a channel that can not be used
+            // peroperly in differential mode, return an error
+            return HAL_ERROR;
+        }
+    }
+    else
+    {
+        nChannel = CHANNEL_AINCOM;
+    }
+
+    // Change the channels in the MUX register
+    status = ADS1256_Register_Write(ads, MUX_REG, (pChannel << 4) | nChannel);
+    if (status != HAL_OK) return status;
+
+    // Issue a SYNC/WAKEUP command to restart conversion process
+    status = ADS1256_Send_Command(ads, SYNC_CMD);
+    if (status != HAL_OK) return status;
+    DWT_Delay_us(4);
+    status = ADS1256_Send_Command(ads, WAKEUP_CMD);
+    if (status != HAL_OK) return status;
+
+    return status;
+}
+
+/**
+ *  HAL_StatusTypeDef ADS1256_System_Cal(ADS1256 *ads)
+ *  
+ *  Perform a self calibration on the ADS1256 pointed
+ *  to by ads.
+ * 
+ *  Returns a HAL_StatusTypeDef.
+*/
+HAL_StatusTypeDef ADS1256_Self_Cal(ADS1256 *ads)
+{
+    HAL_StatusTypeDef status;
+
+    // Send the command to perform a self calibration
+    status = ADS1256_Send_Command(ads, SELFCAL_CMD);
+
+    // Wait until the DRDY pin is brought low
+    while ((ads->rdyPort->IDR & ads->rdyPin) != 0);
 
     return status;
 }
