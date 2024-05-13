@@ -29,9 +29,9 @@
 #define RDATAC_CMD      0x03
 #define SDATAC_CMD      0x0F
 #define RREG_CMD_1      0x10    /* low 4 bits are reg address to read*/
-#define RREG_CMD_2      0x00    /* low 4 bits are number regs to read*/
+#define RREG_CMD_2      0x00    /* low 4 bits are number regs to read - 1*/
 #define WREG_CMD_1      0x50    /* low 4 bits are reg address to write*/
-#define WREG_CMD_2      0x00    /* low 4 bits are number regs to write*/
+#define WREG_CMD_2      0x00    /* low 4 bits are number regs to write - 1*/
 #define SELFCAL_CMD     0xF0
 #define SELFOCAL_CMD    0xF1
 #define SELFGCAL_CMD    0xF2
@@ -48,10 +48,6 @@ typedef struct
     // STM32F7 HAL specific handler for SPI communication
     SPI_HandleTypeDef *spiHandle;
 
-    // 24 bit buffer that contains digital conversion results
-    // from the last ADS1256 conversion sent over MISO line
-    uint8_t inputBuffer[3];
-
     // Port where the chip select GPIO pin is located
     GPIO_TypeDef *csPort;
 
@@ -67,8 +63,8 @@ typedef struct
 
 HAL_StatusTypeDef ADS1256_Init(ADS1256 *ads, SPI_HandleTypeDef *spiHandle, GPIO_TypeDef *csPort, uint16_t csPin, GPIO_TypeDef *rdyPort, uint16_t rdyPin);
 HAL_StatusTypeDef ADS1256_Send_Command(ADS1256 *ads, uint8_t command);
-HAL_StatusTypeDef ADS1256_Register_Read(ADS1256 *ads, uint8_t regAddr, uint8_t nRegRead);
-HAL_StatusTypeDeg ADS1256_Register_Write(ADS1256 *ads, uint8_t regAddr, uint8_t nRegWrite, uint8_t *data);
+HAL_StatusTypeDef ADS1256_Register_Read(ADS1256 *ads, uint8_t regAddr, uint8_t *inBuffer);
+HAL_StatusTypeDef ADS1256_Register_Write(ADS1256 *ads, uint8_t regAddr, uint8_t data);
 
 
 #endif
