@@ -13,6 +13,7 @@
 /* ADS1256 Register Addresses */
 typedef enum
 {
+    STATUS_REG      =   0x00,
     MUX_REG         =   0x01,
     ADCON_REG       =   0x02,
     DRATE_REG       =   0x03,
@@ -44,7 +45,6 @@ typedef enum
     SYNC_CMD        =   0xFC,
     STANDBY_CMD     =   0xFD,
     RESET_CMD       =   0xFE,
-    WAKEUP_CMD      =   0xFF,
 } ADS1256_Command;
 
 /* ADS1256 Sensor Struct */

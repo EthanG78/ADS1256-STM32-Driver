@@ -45,7 +45,7 @@ HAL_StatusTypeDef ADS1256_Init(ADS1256 *ads, SPI_HandleTypeDef *spiHandle, GPIO_
 
     // Turn off digital clock output (it isn't reset with RESET command)
     // by clearing bit 6 and 7 of the ADCON register
-    status = ADS1256_Register_Write(ads, ADCON_REG, 0, 0b00011111);
+    status = ADS1256_Register_Write(ads, ADCON_REG, 0b00011111);
     if (status != HAL_OK) return status;
 
     // Initialize status register with following settings:
@@ -54,7 +54,7 @@ HAL_StatusTypeDef ADS1256_Init(ADS1256 *ads, SPI_HandleTypeDef *spiHandle, GPIO_
     //  - Analog input buffer disabled
     // NOTE: Any of these bits can be changed manually
     // using the ADS1256_Register_Write command after init.
-    status = ADS1256_Register_Write(ads, STATUS_REG, 0, 0b11110101);
+    status = ADS1256_Register_Write(ads, STATUS_REG, 0b11110101);
     if (status != HAL_OK) return status;
 
     // TODO: Replace this with an ADS1256_Self_Calibration function
