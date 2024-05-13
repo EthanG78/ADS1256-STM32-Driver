@@ -7,6 +7,24 @@
 #include "ADS1256.h"
 #include "util.h"
 
+/**
+ *  HAL_StatusTypeDef ADS1256_Init(ADS1256 *ads, SPI_HandleTypeDef *spiHandle, GPIO_TypeDef *csPort, uint16_t csPin, GPIO_TypeDef *rdyPort, uint16_t rdyPin)
+ *  
+ *  Initialize the ADS1256 struct with spiHandle and the ports/pins
+ *  for the active low chip select and data ready GPIO lines. This function
+ *  must be called before usage of the other functions in this driver. The ADS1256
+ *  is initialized with the following settings:
+ *      - Most significant bit first
+ *      - Auto-calibration enabled
+ *      - Analog input buffer disabled
+ * 
+ *  Any of these settings may be overwritten using the ADS1256_Register_Write function.
+ * 
+ *  This function performs a full self-calibration before returning.
+ *  
+ *  Returns a HAL_StatusTypeDef.
+*/
+
 HAL_StatusTypeDef ADS1256_Init(ADS1256 *ads, SPI_HandleTypeDef *spiHandle, GPIO_TypeDef *csPort, uint16_t csPin, GPIO_TypeDef *rdyPort, uint16_t rdyPin)
 {
     HAL_StatusTypeDef status;
@@ -39,18 +57,64 @@ HAL_StatusTypeDef ADS1256_Init(ADS1256 *ads, SPI_HandleTypeDef *spiHandle, GPIO_
     status = ADS1256_Register_Write(ads, STATUS_REG, 0, 0b11110101);
     if (status != HAL_OK) return status;
 
+    // TODO: Replace this with an ADS1256_Self_Calibration function
+    // call as we need to wait until DRDY goes low.
     // Perform a full self-calibration (gain and offset cal)
-    status = ADS1256_Send_Command(ads, SELFCAL_CMD);
+    // status = ADS1256_Send_Command(ads, SELFCAL_CMD);
     return status;
 }
 
-__attribute__((optimize("-Ofast"))) HAL_StatusTypeDef ADS1256_Send_Command(ADS1256 *ads, uint8_t command)
+/**
+ *  HAL_StatusTypeDef ADS1256_Send_Command(ADS1256 *ads, uint8_t command)
+ *  
+ *  Sends the command byte to the ADS1256 specified by ads over SPI and waits
+ *  50 clock periods before returning.  
+ * 
+ *  Returns a HAL_StatusTypeDef.
+*/
+__attribute__((optimize("-Ofast"))) HAL_StatusTypeDef ADS1256_Send_Command(ADS1256 *ads, ADS1256_Command command)
 {
-    // NOTE: CS must stay low
+    // Bring the chip select line low
+    ads->csPort->BSRR = (uint32_t)ads->csPin << 16;
+
+    // Initialize the SPI peripheral by setting SPE bit
+    ads->spiHandle->Instance->CR1 |= 0x0040;
+    
+    // Transmit the command over SPI
+    if (SPI_Transmit(ads->spiHandle, 1, &command) != 1)
+    {
+        return HAL_ERROR;
+    }
+
+    // Wait 50 master clock periods
+    // If we assume fclk is 7.68 MHz, then
+    // this delay would be 6.51 us
+    DWT_Delay_us(7);
+
+    // Disable SPI using procedure outlined in
+    // Section 32.5.9 of Reference Manual 0385:
+    // Wait until FTLVL[1:0] is 0b00 and BSY is 0
+    while ((ads->spiHandle->Instance->SR & 0x1800) == 0x1800
+        || (ads->spiHandle->Instance->SR & 0x0080) == 0x0080);
+
+    // Disable SPI by clearing SPE bit (bit 6)
+    ads->spiHandle->Instance->CR1 &= 0xFFBF;
+
+    // Bring the chip select line high
+    ads->csPort->BSRR = ads->csPin;
+
+    return HAL_OK;
 }
 
-// NOTE: Only allow for contents of a single register to be read at a time
-__attribute__((optimize("-Ofast"))) HAL_StatusTypeDef ADS1256_Register_Read(ADS1256 *ads, uint8_t regAddr, uint8_t *inBuffer)
+/**
+ *  HAL_StatusTypeDef ADS1256_Register_Read(ADS1256 *ads, uint8_t regAddr, uint8_t *inBuffer)
+ *  
+ *  Read the single byte contents of the register pointed to by regAddr into
+ *  the inBuffer byte array of size 1 using the spiHandle of ads.  
+ * 
+ *  Returns a HAL_StatusTypeDef.
+*/
+__attribute__((optimize("-Ofast"))) HAL_StatusTypeDef ADS1256_Register_Read(ADS1256 *ads, ADS1256_Register regAddr, uint8_t *inBuffer)
 {
     HAL_StatusTypeDef status;
 
@@ -99,7 +163,15 @@ __attribute__((optimize("-Ofast"))) HAL_StatusTypeDef ADS1256_Register_Read(ADS1
     return status;
 }
 
-__attribute__((optimize("-Ofast"))) HAL_StatusTypeDef ADS1256_Register_Write(ADS1256 *ads, uint8_t regAddr, uint8_t data)
+/**
+ *  HAL_StatusTypeDef ADS1256_Register_Write(ADS1256 *ads, uint8_t regAddr, uint8_t data)
+ *  
+ *  Write the single byte, data, to the contents of the register pointed to by
+ *  regAddr on the ADS1256 communicating through ads' spiHandle.
+ * 
+ *  Returns a HAL_StatusTypeDef.
+*/
+__attribute__((optimize("-Ofast"))) HAL_StatusTypeDef ADS1256_Register_Write(ADS1256 *ads, ADS1256_Register regAddr, uint8_t data)
 {
     HAL_StatusTypeDef status;
 
