@@ -11,8 +11,10 @@
 #include "stm32f7xx_hal.h" /* Needed for structure defs */
 
 uint32_t DWT_Delay_Init(void);
-uint8_t SPI_Transmit(SPI_HandleTypeDef *spiHandle, uint8_t nBytes, uint8_t *txBuff);
-uint8_t SPI_Receive(SPI_HandleTypeDef *spiHandle, uint8_t nBytes, uint8_t *rxBuff);
+HAL_StatusTypeDef SPI_Transmit_Byte(SPI_HandleTypeDef *spiHandle, uint8_t byte);
+HAL_StatusTypeDef SPI_Transmit_Bytes(SPI_HandleTypeDef *spiHandle, uint8_t nBytes, uint8_t *txBuff);
+HAL_StatusTypeDef SPI_Receive_Byte(SPI_HandleTypeDef *spiHandle, uint8_t *rxBuff);
+HAL_StatusTypeDef SPI_Receive_Bytes(SPI_HandleTypeDef *spiHandle, uint8_t nBytes, uint8_t *rxBuff);
 
 /**
  *  void DWT_Delay_us(volatile uint32_t au32_microseconds)
@@ -23,7 +25,6 @@ uint8_t SPI_Receive(SPI_HandleTypeDef *spiHandle, uint8_t nBytes, uint8_t *rxBuf
  *  from the following article by Khaled Magdy:
  *  https://deepbluembedded.com/stm32-delay-microsecond-millisecond-utility-dwt-delay-timer-delay/
 */
-
 static inline void DWT_Delay_us(volatile uint32_t au32_microseconds)
 {
   uint32_t au32_initial_ticks = DWT->CYCCNT;

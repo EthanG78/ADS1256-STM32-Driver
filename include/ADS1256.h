@@ -10,6 +10,8 @@
 #include "stm32f7xx_hal.h" /* Needed for structure defs */
 #include "stdint.h"
 
+#define ADS1256_ID 3
+
 /* ADS1256 Register Addresses */
 typedef enum
 {
@@ -118,13 +120,22 @@ typedef struct
 
     // 16 bit pin number of the data ready (DRDY) GPIO pin (active low)
     uint16_t rdyPin;
+
+    // Port where the reset GPIO pin is located
+    GPIO_TypeDef *resetPort;
+
+    // 16 bit pin number of the reset GPIO pin (active low)
+    uint16_t resetPin;
 } ADS1256;
 
-HAL_StatusTypeDef ADS1256_Init(ADS1256 *ads, SPI_HandleTypeDef *spiHandle, GPIO_TypeDef *csPort, uint16_t csPin, GPIO_TypeDef *rdyPort, uint16_t rdyPin);
+HAL_StatusTypeDef ADS1256_Init(ADS1256 *ads, SPI_HandleTypeDef *spiHandle, GPIO_TypeDef *csPort, uint16_t csPin, GPIO_TypeDef *rdyPort, uint16_t rdyPin, GPIO_TypeDef *resetPort, uint16_t resetPin);
+void ADS1256_Hardware_Reset(ADS1256 *ads);
 HAL_StatusTypeDef ADS1256_Send_Command(ADS1256 *ads, ADS1256_Command command);
 HAL_StatusTypeDef ADS1256_Register_Read(ADS1256 *ads, ADS1256_Register regAddr, uint8_t *inBuffer);
 HAL_StatusTypeDef ADS1256_Register_Write(ADS1256 *ads, ADS1256_Register regAddr, uint8_t data);
 HAL_StatusTypeDef ADS1256_Set_Mode(ADS1256 *ads, ADS1256_Mode mode);
 HAL_StatusTypeDef ADS1256_Set_Channel(ADS1256 *ads, ADS1256_Channel pChannel);
-HAL_StatusTypeDef ADS1256_Self_Cal(ADS1256 *ads)
+HAL_StatusTypeDef ADS1256_Self_Cal(ADS1256 *ads);
+uint8_t ADS1256_Read_ID(ADS1256 *ads);
+HAL_StatusTypeDef ADS1256_Read_Data(ADS1256 *ads, uint8_t *inBuffer);
 #endif

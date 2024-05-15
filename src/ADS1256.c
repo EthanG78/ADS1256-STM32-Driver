@@ -27,7 +27,7 @@
  *  
  *  Returns a HAL_StatusTypeDef.
 */
-HAL_StatusTypeDef ADS1256_Init(ADS1256 *ads, SPI_HandleTypeDef *spiHandle, GPIO_TypeDef *csPort, uint16_t csPin, GPIO_TypeDef *rdyPort, uint16_t rdyPin)
+HAL_StatusTypeDef ADS1256_Init(ADS1256 *ads, SPI_HandleTypeDef *spiHandle, GPIO_TypeDef *csPort, uint16_t csPin, GPIO_TypeDef *rdyPort, uint16_t rdyPin, GPIO_TypeDef *resetPort, uint16_t resetPin)
 {
     HAL_StatusTypeDef status;
 
@@ -37,13 +37,21 @@ HAL_StatusTypeDef ADS1256_Init(ADS1256 *ads, SPI_HandleTypeDef *spiHandle, GPIO_
     ads->csPin = csPin;
     ads->rdyPort = rdyPort;
     ads->rdyPin = rdyPin;
+    ads->resetPort = resetPort;
+    ads->resetPin = resetPin;
 
     // Initialize the Data Watchpoint Trigger
     if (DWT_Delay_Init()) return HAL_ERROR;
 
-    // Perform a device reset using the RESET command
-    status = ADS1256_Send_Command(ads, RESET_CMD);
-    if (status != HAL_OK) return status;
+    // Issue a hardware reset using the reset port/pin
+    ADS1256_Hardware_Reset(ads);
+
+    // Check to make sure SPI communication is working properly
+    // by verifying the device if of the connected ADS1256
+    if (ADS1256_Read_ID(ads) != ADS1256_ID)
+    {
+        return HAL_ERROR;
+    }
 
     // Initialize A/D control register with following settings:
     //  - Digital clock output disabled
@@ -70,50 +78,67 @@ HAL_StatusTypeDef ADS1256_Init(ADS1256 *ads, SPI_HandleTypeDef *spiHandle, GPIO_
     // Initialize the ADS1256 to use analog input channel 0
     status = ADS1256_Set_Channel(ads, CHANNEL_AIN0);
     if (status != HAL_OK) return status;
-
-    return status;
+ 
+    return ADS1256_Self_Cal(ads);
 }
+
+/**
+ * void ADS1256_Hardware_Reset(ADS1256 *ads) 
+ * 
+ *  Issue a hardware reset of the ADS1256
+ *  using the supplied reset port and pin.
+*/
+void ADS1256_Hardware_Reset(ADS1256 *ads)
+{
+    // Bring the reset pin high
+    ads->resetPort->BSRR = ads->resetPin;
+    HAL_Delay(200);
+    // Bring the reset pin low to initiate a reset
+    ads->resetPort->BSRR = (uint32_t)ads->resetPin << 16;
+    HAL_Delay(200);
+    // Bring the reset pin high again
+    ads->resetPort->BSRR = ads->resetPin;
+
+	// Wait until the DRDY pin is brought low
+	while ((ads->rdyPort->IDR & ads->rdyPin) != 0);
+}
+
 
 /**
  *  HAL_StatusTypeDef ADS1256_Send_Command(ADS1256 *ads, uint8_t command)
  *  
  *  Sends the command byte to the ADS1256 specified by ads over SPI and waits
- *  50 clock periods before returning.  
- * 
+ *  the minimum amount of time before another command is allowed to be sent.
+ *  
  *  Returns a HAL_StatusTypeDef.
 */
 __attribute__((optimize("-Ofast"))) HAL_StatusTypeDef ADS1256_Send_Command(ADS1256 *ads, ADS1256_Command command)
 {
+    HAL_StatusTypeDef status;
+
     // Bring the chip select line low
     ads->csPort->BSRR = (uint32_t)ads->csPin << 16;
 
-    // Initialize the SPI peripheral by setting SPE bit
-    ads->spiHandle->Instance->CR1 |= 0x0040;
-    
-    // Transmit the command over SPI
-    if (SPI_Transmit(ads->spiHandle, 1, &command) != 1)
-    {
-        return HAL_ERROR;
-    }
-
-    // Wait 50 master clock periods
-    // If we assume fclk is 7.68 MHz, then
-    // this delay would be 6.51 us
-    DWT_Delay_us(7);
-
-    // Disable SPI using procedure outlined in
-    // Section 32.5.9 of Reference Manual 0385:
-    // Wait until FTLVL[1:0] is 0b00 and BSY is 0
-    while ((ads->spiHandle->Instance->SR & 0x1800) == 0x1800
-        || (ads->spiHandle->Instance->SR & 0x0080) == 0x0080);
-
-    // Disable SPI by clearing SPE bit (bit 6)
-    ads->spiHandle->Instance->CR1 &= 0xFFBF;
+    // Transmit the command byte to the ADS1256
+    status = SPI_Transmit_Byte(ads->spiHandle, command);
 
     // Bring the chip select line high
     ads->csPort->BSRR = ads->csPin;
 
-    return HAL_OK;
+    // Based on the command, we must wait either 24 CLKIN periods
+    // or until the DRDY line goes low before we can allow another command
+    if (command & (RREG_CMD_1 | RREG_CMD_2 | WREG_CMD_1 | WREG_CMD_2 | RDATA_CMD | RDATAC_CMD | RESET_CMD | SYNC_CMD))
+    {
+        // Wait 24 CLKIN periods (3.125 us)
+        DWT_Delay_us(4);
+    }
+    else
+    {
+        // Wait until the DRDY pin is brought low
+        while ((ads->rdyPort->IDR & ads->rdyPin) != 0);
+    }
+
+    return status;
 }
 
 /**
@@ -128,45 +153,26 @@ __attribute__((optimize("-Ofast"))) HAL_StatusTypeDef ADS1256_Register_Read(ADS1
 {
     HAL_StatusTypeDef status;
 
-    // Build the full command to be sent over SPI
-    uint8_t cmdSeq[2];
-    cmdSeq[0] = RREG_CMD_1 & (regAddr & 0x0F);
-    cmdSeq[1] = RREG_CMD_2; /* Only allow for reading 1 register at a time */ 
-
     // Bring the chip select line low
     ads->csPort->BSRR = (uint32_t)ads->csPin << 16;
 
-    // Initialize the SPI peripheral by setting SPE bit
-    ads->spiHandle->Instance->CR1 |= 0x0040;
+    // Send the first read register command bit or'd with the
+    // address of the register we want to read
+    status = SPI_Transmit_Byte(ads->spiHandle, RREG_CMD_1 | regAddr);
+    if (status != HAL_OK) goto endRead;
 
-    // Send the command sequence indicating the start
-    // register cmdSeq[0] and how many registers should
-    // be read cmdSeq[1]
-    if (SPI_Transmit(ads->spiHandle, 2, &cmdSeq[0]) != 2)
-    {
-        return HAL_ERROR;
-    }
+    // Send the second read register command indicating we
+    // only want to read this register
+    status = SPI_Transmit_Byte(ads->spiHandle, RREG_CMD_2);
+    if (status != HAL_OK) goto endRead;
 
-    // Wait 50 master clock periods
-    // If we assume fclk is 7.68 MHz, then
-    // this delay would be 6.51 us
+    // Wait 50 CLKIN periods (assuming CLKIN = 7.68 MHz this would be 6.51 us)
     DWT_Delay_us(7);
 
-    // Read the data byte contents of the requested register
-    if (SPI_Receive(ads->spiHandle, 1, inBuffer) != 1)
-    {
-        return HAL_ERROR;
-    }
-
-    // Disable SPI using procedure outlined in
-    // Section 32.5.9 of Reference Manual 0385:
-    // Wait until FTLVL[1:0] is 0b00 and BSY is 0
-    while ((ads->spiHandle->Instance->SR & 0x1800) == 0x1800
-        || (ads->spiHandle->Instance->SR & 0x0080) == 0x0080);
-
-    // Disable SPI by clearing SPE bit (bit 6)
-    ads->spiHandle->Instance->CR1 &= 0xFFBF;
-
+    // Receive the byte contents of the requested register from ADS1256
+    status = SPI_Receive_Byte(ads->spiHandle, inBuffer);
+    
+endRead: 
     // Bring the chip select line high
     ads->csPort->BSRR = ads->csPin;
 
@@ -185,40 +191,27 @@ __attribute__((optimize("-Ofast"))) HAL_StatusTypeDef ADS1256_Register_Write(ADS
 {
     HAL_StatusTypeDef status;
 
-    // Build the full command to be sent over SPI
-    uint8_t cmdSeq[3];
-    cmdSeq[0] = WREG_CMD_1 & (regAddr & 0x0F);
-    cmdSeq[1] = WREG_CMD_2; /* Only allow for writing to 1 register at a time */ 
-    cmdSeq[2] = data;
-
     // Bring the chip select line low
     ads->csPort->BSRR = (uint32_t)ads->csPin << 16;
 
-    // Initialize the SPI peripheral by setting SPE bit
-    ads->spiHandle->Instance->CR1 |= 0x0040;
+    // Send the first write register command bit or'd with the
+    // address of the register we want to write to
+    status = SPI_Transmit_Byte(ads->spiHandle, WREG_CMD_1 | regAddr);
+    if (status != HAL_OK) goto endWrite;
 
-    // Send the command sequence indicating the start
-    // register cmdSeq[0], how many registers should
-    // be written to cmdSeq[1] (only 1 for now), and the
-    // byte to be written to that register cmdSeq[2]
-    if (SPI_Transmit(ads->spiHandle, 3, &cmdSeq[0]) != 3)
-    {
-        return HAL_ERROR;
-    }
+    // Send the second write register command indicating we
+    // only want to write to this register
+    status = SPI_Transmit_Byte(ads->spiHandle, WREG_CMD_2);
+    if (status != HAL_OK) goto endWrite;
 
-    // Disable SPI using procedure outlined in
-    // Section 32.5.9 of Reference Manual 0385:
-    // Wait until FTLVL[1:0] is 0b00 and BSY is 0
-    while ((ads->spiHandle->Instance->SR & 0x1800) == 0x1800
-        || (ads->spiHandle->Instance->SR & 0x0080) == 0x0080);
+    // Send the data we want to write to the register
+    status = SPI_Transmit_Byte(ads->spiHandle, data);
 
-    // Disable SPI by clearing SPE bit (bit 6)
-    ads->spiHandle->Instance->CR1 &= 0xFFBF;
-
+endWrite:
     // Bring the chip select line high
     ads->csPort->BSRR = ads->csPin;
 
-    return status;
+    return status; 
 }
 
 /**
@@ -325,13 +318,64 @@ HAL_StatusTypeDef ADS1256_Set_Channel(ADS1256 *ads, ADS1256_Channel pChannel)
 */
 HAL_StatusTypeDef ADS1256_Self_Cal(ADS1256 *ads)
 {
+    return ADS1256_Send_Command(ads, SELFCAL_CMD);
+}
+
+/**
+ *  uint8_t ADS1256_Read_Id(ADS1256 *ads)
+ * 
+ *  Reads the contents of the ADS1256's STATUS register
+ *  and returns the device id found in the upper 4 bits.
+ * 
+ *  An unsigned 8 bit integer representing the device id,
+ *  or 0 on failure. 
+*/
+uint8_t ADS1256_Read_ID(ADS1256 *ads)
+{
+    // Read the STATUS register where the device ID is stored
+    // in the upper 4 bits of the register
+    uint8_t deviceId;
+    if (ADS1256_Register_Read(ads, STATUS_REG, &deviceId) != HAL_OK)
+    {
+        return 0;
+    }
+
+    // Return the register's contents shifted 4 bits to the right
+    return deviceId >> 4;
+}
+
+/**
+ *  HAL_StatusTypeDef ADS1256_Read_Data(ADS1256 *ads, uint8_t *inBuffer)
+ * 
+ *  Read the latest 24-bit conversion result from the ADS1256 into
+ *  the inBuffer byte array. inBuffer must be able to hold 24 bits.
+ * 
+ *  Returns a HAL_StatusTypeDef.
+*/
+HAL_StatusTypeDef ADS1256_Read_Data(ADS1256 *ads, uint8_t *inBuffer)
+{
     HAL_StatusTypeDef status;
 
-    // Send the command to perform a self calibration
-    status = ADS1256_Send_Command(ads, SELFCAL_CMD);
-
-    // Wait until the DRDY pin is brought low
+    // Wait until the DRDY pin is brought low 
     while ((ads->rdyPort->IDR & ads->rdyPin) != 0);
+
+    // Bring the chip select line low
+    ads->csPort->BSRR = (uint32_t)ads->csPin << 16;
+
+    status = SPI_Transmit_Byte(ads->spiHandle, RDATA_CMD);
+    if (status != HAL_OK) goto endRead;
+    
+    // Wait 50 CLKIN periods (assuming CLKIN = 7.68 MHz this would be 6.51 us)
+    DWT_Delay_us(7);
+
+    // TODO: TEST THIS!
+    // Read the 24 bit conversion results and store in
+    // the supplied buffer
+    status = SPI_Receive_Bytes(ads->spiHandle, 3, inBuffer);
+
+endRead:
+    // Bring the chip select line high
+    ads->csPort->BSRR = ads->csPin;
 
     return status;
 }
