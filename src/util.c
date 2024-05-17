@@ -81,7 +81,7 @@ HAL_StatusTypeDef SPI_Disable(SPI_HandleTypeDef *spiHandle, uint32_t timeout)
     while ((spiHandle->Instance->SR & 0x0600) == 0x0600)
     {
         tempReg = *tempRx;
-        (void)tempReg;  /* Avoids GCC unused warning */
+        (void)tempReg;  // Avoids GCC unused warning
     }
 
     return HAL_OK;
@@ -203,6 +203,7 @@ __attribute__((optimize("-Ofast"))) HAL_StatusTypeDef SPI_Receive_Bytes(SPI_Hand
         }
     }
 
+
     SPI_Disable(spiHandle, 0);
 
     __HAL_UNLOCK(spiHandle);
@@ -230,14 +231,14 @@ __attribute__((optimize("-Ofast"))) HAL_StatusTypeDef SPI_Receive_Byte(SPI_Handl
 	spiHandle->Instance->CR2 |= 0x1000;
 
     // Wait for the Tx buffer to be empty
-    while ((spiHandle->Instance->SR & ~0x0002) != 0x0002);
+    while (!(spiHandle->Instance->SR & 0x0002));
 
     // Since we are operating in master mode, we must send a dummy
     // transmission to generate a clock cycle to read in this data.
     *((volatile uint8_t *)&spiHandle->Instance->DR) = 0x00;
 
     // Wait for the Rx buffer to be 1/4 full (have 8 bits)
-    while ((spiHandle->Instance->SR & ~0x0001) != 0x0001);
+    while (!(spiHandle->Instance->SR & 0x0001));
 
     // Store the byte currently in the SPI data register
     // at the starting address of rxBuff

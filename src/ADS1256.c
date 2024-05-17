@@ -39,6 +39,7 @@ HAL_StatusTypeDef ADS1256_Init(ADS1256 *ads, SPI_HandleTypeDef *spiHandle, GPIO_
     ads->rdyPin = rdyPin;
     ads->resetPort = resetPort;
     ads->resetPin = resetPin;
+    ads->mode = MODE_SINGLE_ENDED;
 
     // Initialize the Data Watchpoint Trigger
     if (DWT_Delay_Init()) return HAL_ERROR;
@@ -47,8 +48,17 @@ HAL_StatusTypeDef ADS1256_Init(ADS1256 *ads, SPI_HandleTypeDef *spiHandle, GPIO_
     ADS1256_Hardware_Reset(ads);
 
     // Check to make sure SPI communication is working properly
-    // by verifying the device if of the connected ADS1256
-    if (ADS1256_Read_ID(ads) != ADS1256_ID)
+    // by verifying the device if of the connected ADS1256. It's okay
+    // if it fails a few times, that's why we have the timeout!
+    uint8_t deviceId;
+    uint32_t timeout = 0;
+    do
+    {
+    	ADS1256_Read_ID(ads, &deviceId);
+    	timeout++;
+    } while (deviceId != ADS1256_ID && timeout < HAL_MAX_DELAY);
+
+    if (deviceId != ADS1256_ID)
     {
         return HAL_ERROR;
     }
@@ -78,8 +88,59 @@ HAL_StatusTypeDef ADS1256_Init(ADS1256 *ads, SPI_HandleTypeDef *spiHandle, GPIO_
     // Initialize the ADS1256 to use analog input channel 0
     status = ADS1256_Set_Channel(ads, CHANNEL_AIN0);
     if (status != HAL_OK) return status;
+
+    // Verify the configuration of the above registers
+    // by reading back their contents
+    status = ADS1256_Verify_Config(ads);
+    if (status != HAL_OK) return status;
  
+    // Perform a self calibration of the device
+    // before finishing initialization.
     return ADS1256_Self_Cal(ads);
+}
+
+HAL_StatusTypeDef ADS1256_Verify_Config(ADS1256 *ads)
+{
+	HAL_StatusTypeDef status;
+	uint8_t regBits;
+
+	// Read the contents of the ADCON register and
+	// verify they are configured with:
+    //  - Digital clock output disabled
+    //  - Sensor detect current source disabled
+    //  - Gain of 1
+	status = ADS1256_Register_Read(ads, ADCON_REG, &regBits);
+	if (status != HAL_OK || regBits != 0x00) return HAL_ERROR;
+
+	// Read the contents of the STATUS register and
+	// verify they are configured with:
+    //  - Most significant bit first
+    //  - Auto-calibration enabled
+    //  - Analog input buffer disabled
+	do
+	{
+		status = ADS1256_Register_Read(ads, STATUS_REG, &regBits);
+	} while ((regBits & 0x0E) != 0x04);
+	if (status != HAL_OK || (regBits & 0x0E) != 0x04) return HAL_ERROR;
+
+	// Read the contents of the DRATE register and
+	// verify they are configured with a data rate of 30k sps
+	do
+	{
+		status = ADS1256_Register_Read(ads, DRATE_REG, &regBits);
+	} while (regBits != DRATE_30K_SPS);
+	if (status != HAL_OK || regBits != DRATE_30K_SPS) return HAL_ERROR;
+
+	// Read the contents of the MUX register and
+	// verify that the ADS1256 is configured using
+	// channels AIN0 and AINCOM
+	do
+	{
+		status = ADS1256_Register_Read(ads, MUX_REG, &regBits);
+	} while ((regBits & 0xF8) == 0x08);
+	if (status != HAL_OK || (regBits & 0xF8) == 0x08) return HAL_ERROR;
+
+	return HAL_OK;
 }
 
 /**
@@ -112,7 +173,7 @@ void ADS1256_Hardware_Reset(ADS1256 *ads)
  *  
  *  Returns a HAL_StatusTypeDef.
 */
-__attribute__((optimize("-Ofast"))) HAL_StatusTypeDef ADS1256_Send_Command(ADS1256 *ads, ADS1256_Command command)
+HAL_StatusTypeDef ADS1256_Send_Command(ADS1256 *ads, ADS1256_Command command)
 {
     HAL_StatusTypeDef status;
 
@@ -146,10 +207,14 @@ __attribute__((optimize("-Ofast"))) HAL_StatusTypeDef ADS1256_Send_Command(ADS12
  *  
  *  Read the single byte contents of the register pointed to by regAddr into
  *  the inBuffer byte array of size 1 using the spiHandle of ads.  
+ *
+ *  TODO: There is a weird bug where you need to call this twice to actually get
+ *  the contents of the register. I think the timings with reading from the SPI
+ *  bus is off...
  * 
  *  Returns a HAL_StatusTypeDef.
 */
-__attribute__((optimize("-Ofast"))) HAL_StatusTypeDef ADS1256_Register_Read(ADS1256 *ads, ADS1256_Register regAddr, uint8_t *inBuffer)
+HAL_StatusTypeDef ADS1256_Register_Read(ADS1256 *ads, ADS1256_Register regAddr, uint8_t *inBuffer)
 {
     HAL_StatusTypeDef status;
 
@@ -168,10 +233,10 @@ __attribute__((optimize("-Ofast"))) HAL_StatusTypeDef ADS1256_Register_Read(ADS1
 
     // Wait 50 CLKIN periods (assuming CLKIN = 7.68 MHz this would be 6.51 us)
     DWT_Delay_us(7);
-
+    // HAL_Delay(1);
     // Receive the byte contents of the requested register from ADS1256
     status = SPI_Receive_Byte(ads->spiHandle, inBuffer);
-    
+
 endRead: 
     // Bring the chip select line high
     ads->csPort->BSRR = ads->csPin;
@@ -187,7 +252,7 @@ endRead:
  * 
  *  Returns a HAL_StatusTypeDef.
 */
-__attribute__((optimize("-Ofast"))) HAL_StatusTypeDef ADS1256_Register_Write(ADS1256 *ads, ADS1256_Register regAddr, uint8_t data)
+HAL_StatusTypeDef ADS1256_Register_Write(ADS1256 *ads, ADS1256_Register regAddr, uint8_t data)
 {
     HAL_StatusTypeDef status;
 
@@ -322,26 +387,26 @@ HAL_StatusTypeDef ADS1256_Self_Cal(ADS1256 *ads)
 }
 
 /**
- *  uint8_t ADS1256_Read_Id(ADS1256 *ads)
+ *  uint8_t ADS1256_Read_Id(ADS1256 *ads, uint8_t id)
  * 
  *  Reads the contents of the ADS1256's STATUS register
  *  and returns the device id found in the upper 4 bits.
  * 
- *  An unsigned 8 bit integer representing the device id,
- *  or 0 on failure. 
+ *  Returns a HAL_StatusTypeDef.
 */
-uint8_t ADS1256_Read_ID(ADS1256 *ads)
+HAL_StatusTypeDef ADS1256_Read_ID(ADS1256 *ads, uint8_t *id)
 {
+	HAL_StatusTypeDef status;
+
     // Read the STATUS register where the device ID is stored
     // in the upper 4 bits of the register
-    uint8_t deviceId;
-    if (ADS1256_Register_Read(ads, STATUS_REG, &deviceId) != HAL_OK)
-    {
-        return 0;
-    }
+	status = ADS1256_Register_Read(ads, STATUS_REG, id);
+	if (status != HAL_OK) return status;
 
-    // Return the register's contents shifted 4 bits to the right
-    return deviceId >> 4;
+	// Shift the value of the byte by 4
+	*id = *id >> 4;
+
+	return HAL_OK;
 }
 
 /**
@@ -368,10 +433,32 @@ HAL_StatusTypeDef ADS1256_Read_Data(ADS1256 *ads, uint8_t *inBuffer)
     // Wait 50 CLKIN periods (assuming CLKIN = 7.68 MHz this would be 6.51 us)
     DWT_Delay_us(7);
 
-    // TODO: TEST THIS!
+    // Change the polarity of SPI clock as the ADS1256
+    // clocks data onto DOUT on rising edge
+    // ads->spiHandle->Instance->CR1 &= ~0x0001;
+
     // Read the 24 bit conversion results and store in
-    // the supplied buffer
+    // the supplied buffer:
+    // NOTE: For some reason (probably due to my own incompetence),
+    // the data bytes from the ADS1256 appear on the MISO line
+    // 3 clock cycles AFTER they should be. I have analyzed this
+    // using logic analyzers and it shows that this isn't actually
+    // happening on the DOUT line, thus it HAS to be a software issue.
+    // I have tried debugging it, and I think it has to do with data
+    // being shifted onto DOUT from the ADS1256 on the RISING EDGE
+    // as opposed to data being shifted into DIN on the FALLING EDGE.
+    // I have tried switching the clock polarity for data reading alone
+    // and this BORKS the data.
+    //
+    // As a temporary solution, I am reading 3 dummy bytes to allow for
+    // the actual data to clock in. I am so so sorry.
     status = SPI_Receive_Bytes(ads->spiHandle, 3, inBuffer);
+    status = SPI_Receive_Byte(ads->spiHandle, &inBuffer[0]);
+    status = SPI_Receive_Byte(ads->spiHandle, &inBuffer[1]);
+    status = SPI_Receive_Byte(ads->spiHandle, &inBuffer[2]);
+
+    // Change the polarity of SPI clock back to falling edge
+    // ads->spiHandle->Instance->CR1 |= 0x0001;
 
 endRead:
     // Bring the chip select line high

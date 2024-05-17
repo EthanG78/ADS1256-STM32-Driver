@@ -129,6 +129,7 @@ typedef struct
 } ADS1256;
 
 HAL_StatusTypeDef ADS1256_Init(ADS1256 *ads, SPI_HandleTypeDef *spiHandle, GPIO_TypeDef *csPort, uint16_t csPin, GPIO_TypeDef *rdyPort, uint16_t rdyPin, GPIO_TypeDef *resetPort, uint16_t resetPin);
+HAL_StatusTypeDef ADS1256_Verify_Config(ADS1256 *ads);
 void ADS1256_Hardware_Reset(ADS1256 *ads);
 HAL_StatusTypeDef ADS1256_Send_Command(ADS1256 *ads, ADS1256_Command command);
 HAL_StatusTypeDef ADS1256_Register_Read(ADS1256 *ads, ADS1256_Register regAddr, uint8_t *inBuffer);
@@ -136,6 +137,6 @@ HAL_StatusTypeDef ADS1256_Register_Write(ADS1256 *ads, ADS1256_Register regAddr,
 HAL_StatusTypeDef ADS1256_Set_Mode(ADS1256 *ads, ADS1256_Mode mode);
 HAL_StatusTypeDef ADS1256_Set_Channel(ADS1256 *ads, ADS1256_Channel pChannel);
 HAL_StatusTypeDef ADS1256_Self_Cal(ADS1256 *ads);
-uint8_t ADS1256_Read_ID(ADS1256 *ads);
+HAL_StatusTypeDef ADS1256_Read_ID(ADS1256 *ads, uint8_t *id);
 HAL_StatusTypeDef ADS1256_Read_Data(ADS1256 *ads, uint8_t *inBuffer);
 #endif
