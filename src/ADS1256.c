@@ -4,6 +4,7 @@
  *      Author:     Ethan Garnier
  *      Date:       May 13th, 2024
 */
+#include "math.h"
 #include "ADS1256.h"
 #include "util.h"
 
@@ -48,20 +49,10 @@ HAL_StatusTypeDef ADS1256_Init(ADS1256 *ads, SPI_HandleTypeDef *spiHandle, GPIO_
     ADS1256_Hardware_Reset(ads);
 
     // Check to make sure SPI communication is working properly
-    // by verifying the device if of the connected ADS1256. It's okay
-    // if it fails a few times, that's why we have the timeout!
+    // by verifying the device id of the connected ADS1256.
     uint8_t deviceId;
-    uint32_t timeout = 0;
-    do
-    {
-    	ADS1256_Read_ID(ads, &deviceId);
-    	timeout++;
-    } while (deviceId != ADS1256_ID && timeout < HAL_MAX_DELAY);
-
-    if (deviceId != ADS1256_ID)
-    {
-        return HAL_ERROR;
-    }
+    ADS1256_Read_ID(ads, &deviceId);
+    if (deviceId != ADS1256_ID) return HAL_ERROR;
 
     // Initialize A/D control register with following settings:
     //  - Digital clock output disabled
@@ -117,28 +108,19 @@ HAL_StatusTypeDef ADS1256_Verify_Config(ADS1256 *ads)
     //  - Most significant bit first
     //  - Auto-calibration enabled
     //  - Analog input buffer disabled
-	do
-	{
-		status = ADS1256_Register_Read(ads, STATUS_REG, &regBits);
-	} while ((regBits & 0x0E) != 0x04);
+	status = ADS1256_Register_Read(ads, STATUS_REG, &regBits);
 	if (status != HAL_OK || (regBits & 0x0E) != 0x04) return HAL_ERROR;
 
 	// Read the contents of the DRATE register and
 	// verify they are configured with a data rate of 30k sps
-	do
-	{
-		status = ADS1256_Register_Read(ads, DRATE_REG, &regBits);
-	} while (regBits != DRATE_30K_SPS);
+	status = ADS1256_Register_Read(ads, DRATE_REG, &regBits);
 	if (status != HAL_OK || regBits != DRATE_30K_SPS) return HAL_ERROR;
 
 	// Read the contents of the MUX register and
 	// verify that the ADS1256 is configured using
 	// channels AIN0 and AINCOM
-	do
-	{
-		status = ADS1256_Register_Read(ads, MUX_REG, &regBits);
-	} while ((regBits & 0xF8) == 0x08);
-	if (status != HAL_OK || (regBits & 0xF8) == 0x08) return HAL_ERROR;
+	status = ADS1256_Register_Read(ads, MUX_REG, &regBits);
+	if (status != HAL_OK || (regBits & 0xF8) != 0x08) return HAL_ERROR;
 
 	return HAL_OK;
 }
@@ -208,10 +190,6 @@ HAL_StatusTypeDef ADS1256_Send_Command(ADS1256 *ads, ADS1256_Command command)
  *  Read the single byte contents of the register pointed to by regAddr into
  *  the inBuffer byte array of size 1 using the spiHandle of ads.  
  *
- *  TODO: There is a weird bug where you need to call this twice to actually get
- *  the contents of the register. I think the timings with reading from the SPI
- *  bus is off...
- * 
  *  Returns a HAL_StatusTypeDef.
 */
 HAL_StatusTypeDef ADS1256_Register_Read(ADS1256 *ads, ADS1256_Register regAddr, uint8_t *inBuffer)
@@ -221,21 +199,28 @@ HAL_StatusTypeDef ADS1256_Register_Read(ADS1256 *ads, ADS1256_Register regAddr, 
     // Bring the chip select line low
     ads->csPort->BSRR = (uint32_t)ads->csPin << 16;
 
-    // Send the first read register command bit or'd with the
-    // address of the register we want to read
-    status = SPI_Transmit_Byte(ads->spiHandle, RREG_CMD_1 | regAddr);
-    if (status != HAL_OK) goto endRead;
+    // TODO: We run this Register Read code twice because there is a very weird
+    // bug in my SPI code that makes the DOUT data we want appear on the wrong
+    // clock cycle. Please reference the note on line 446.
+    uint8_t i;
+    for (i = 0; i < 2; i++)
+    {
+        // Send the first read register command bit or'd with the
+        // address of the register we want to read
+        status = SPI_Transmit_Byte(ads->spiHandle, RREG_CMD_1 | regAddr);
+        if (status != HAL_OK) goto endRead;
 
-    // Send the second read register command indicating we
-    // only want to read this register
-    status = SPI_Transmit_Byte(ads->spiHandle, RREG_CMD_2);
-    if (status != HAL_OK) goto endRead;
+        // Send the second read register command indicating we
+        // only want to read this register
+        status = SPI_Transmit_Byte(ads->spiHandle, RREG_CMD_2);
+        if (status != HAL_OK) goto endRead;
 
-    // Wait 50 CLKIN periods (assuming CLKIN = 7.68 MHz this would be 6.51 us)
-    DWT_Delay_us(7);
-    // HAL_Delay(1);
-    // Receive the byte contents of the requested register from ADS1256
-    status = SPI_Receive_Byte(ads->spiHandle, inBuffer);
+        // Wait 50 CLKIN periods (assuming CLKIN = 7.68 MHz this would be 6.51 us)
+        DWT_Delay_us(7);
+
+        // Receive the byte contents of the requested register from ADS1256
+        status = SPI_Receive_Byte(ads->spiHandle, inBuffer);
+    }
 
 endRead: 
     // Bring the chip select line high
@@ -465,4 +450,49 @@ endRead:
     ads->csPort->BSRR = ads->csPin;
 
     return status;
+}
+
+/**
+ *  float ADS1256_Read_Voltage(ADS1256 *ads, float *voltage)
+ * 
+ *  Read the latest conversion result from the ADS1256 and
+ *  calculate the analog voltage that was provided.
+ * 
+ *  Returns a HAL_StatusTypeDef
+*/
+HAL_StatusTypeDef ADS1256_Read_Voltage(ADS1256 *ads, float *voltage)
+{
+    HAL_StatusTypeDef status;
+    uint8_t data[3];
+    uint8_t PGA, PGAReg;
+    uint32_t outputCode;
+
+    // Read the current conversion result
+    status = ADS1256_Read_Data(ads, &data[0]);
+    if (status != HAL_OK) return HAL_ERROR;
+
+    // Read the contents of the ADCON register to get the current
+    // value of the Programmable Gain
+    status = ADS1256_Register_Read(ads, ADCON_REG, &PGAReg);
+    if (status != HAL_OK) return HAL_ERROR;
+    PGA = pow(2, (PGAReg & 0x07));
+    if (PGA > 64) PGA = 64;
+
+    // Convert the 3 bytes captured from the ADS1256 into
+    // a single 24 bit value.
+    outputCode = ((uint32_t)data[0] << 16) & 0x00FF0000;
+    outputCode |= ((uint32_t)data[1] << 8);
+    outputCode |= data[2];
+
+    // Handling negative values
+    if (outputCode & 0x800000) outputCode &= 0xFF000000;
+
+    // Calculate the input analog voltage from the output code,
+    // the reference voltage, the number of code words, and the 
+    // programmable gain.
+    unsigned long denom = (unsigned long)PGA * BIT_RANGE;
+    unsigned long numer = (unsigned long)VREF * outputCode;
+    *voltage = (float)numer / denom;
+
+    return HAL_OK;
 }

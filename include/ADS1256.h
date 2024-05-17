@@ -11,6 +11,9 @@
 #include "stdint.h"
 
 #define ADS1256_ID 3
+#define VREF 5
+#define BIT_RANGE 8388607UL
+
 
 /* ADS1256 Register Addresses */
 typedef enum
@@ -139,4 +142,5 @@ HAL_StatusTypeDef ADS1256_Set_Channel(ADS1256 *ads, ADS1256_Channel pChannel);
 HAL_StatusTypeDef ADS1256_Self_Cal(ADS1256 *ads);
 HAL_StatusTypeDef ADS1256_Read_ID(ADS1256 *ads, uint8_t *id);
 HAL_StatusTypeDef ADS1256_Read_Data(ADS1256 *ads, uint8_t *inBuffer);
+HAL_StatusTypeDef ADS1256_Read_Voltage(ADS1256 *ads, float *voltage);
 #endif
