@@ -478,14 +478,20 @@ HAL_StatusTypeDef ADS1256_Read_Voltage(ADS1256 *ads, float *voltage)
     PGA = pow(2, (PGAReg & 0x07));
     if (PGA > 64) PGA = 64;
 
+
+    // TODO: Test:
     // Convert the 3 bytes captured from the ADS1256 into
     // a single 24 bit value.
-    outputCode = ((uint32_t)data[0] << 16) & 0x00FF0000;
+    outputCode = (((data[0] & 0x80) ? 0xFF : 0x00) << 24) |
+                                ((uint32_t)data[0] << 16) |       
+                                ((uint32_t)data[1] << 8) |
+                                data[2];
+    /*outputCode = ((uint32_t)data[0] << 16) & 0x00FF0000;
     outputCode |= ((uint32_t)data[1] << 8);
     outputCode |= data[2];
 
     // Handling negative values
-    if (outputCode & 0x800000) outputCode &= 0xFF000000;
+    if (outputCode & 0x800000) outputCode &= 0xFF000000;*/
 
     // Calculate the input analog voltage from the output code,
     // the reference voltage, the number of code words, and the 
