@@ -286,10 +286,22 @@ HAL_StatusTypeDef ADS1256_Set_Mode(ADS1256 *ads, ADS1256_Mode mode)
             // while preserving the current positive input channel
             uint8_t mux = 0x00;
             status = ADS1256_Register_Read(ads, MUX_REG, &mux);
+            if (status != HAL_OK) goto returnStatus;
+
             status = ADS1256_Register_Write(ads, MUX_REG, mux & 0xF8);
+            if (status != HAL_OK) goto returnStatus;
+
+            // Issue a SYNC/WAKEUP command to restart conversion process
+            status = ADS1256_Send_Command(ads, SYNC_CMD);
+            if (status != HAL_OK) goto returnStatus;
+            
+            DWT_Delay_us(4);
+
+            status = ADS1256_Send_Command(ads, WAKEUP_CMD);
+            if (status != HAL_OK) goto returnStatus;
         }
     }
-
+returnStatus:
     return status;
 }
 
@@ -335,7 +347,7 @@ HAL_StatusTypeDef ADS1256_Set_Channel(ADS1256 *ads, ADS1256_Channel pChannel)
             break;
         default:
             // If the user has entered a channel that can not be used
-            // peroperly in differential mode, return an error
+            // properly in differential mode, return an error
             return HAL_ERROR;
         }
     }
