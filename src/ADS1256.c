@@ -68,17 +68,22 @@ HAL_StatusTypeDef ADS1256_Init(ADS1256 *ads, SPI_HandleTypeDef *spiHandle, GPIO_
     status = ADS1256_Register_Write(ads, STATUS_REG, STATUS_DEFAULT);
     if (status != HAL_OK) return status;
 
+    // Wait for auto-calibration to finish
+    HAL_delay(1);
+
     // Initialize data rate register with a data rate of 30 000 sps
     status = ADS1256_Register_Write(ads, DRATE_REG, DRATE_DEFAULT);
     if (status != HAL_OK) return status;
 
-    // Initialize the ADS1256 in single-ended 
-    status = ADS1256_Set_Mode(ads, MODE_SINGLE_ENDED);
-    if (status != HAL_OK) return status;
+    // Wait for auto-calibration to finish
+    HAL_Delay(1);
 
     // Initialize the ADS1256 to use analog input channel 0
-    status = ADS1256_Set_Channel(ads, CHANNEL_AIN0); // might be able to get rid of this call?
+    status = ADS1256_Set_Channel(ads, CHANNEL_AIN0);
     if (status != HAL_OK) return status;
+
+    // Wait for auto-calibration to finish
+    HAL_Delay(1);
 
     // Verify the configuration of the above registers
     // by reading back their contents
@@ -146,6 +151,33 @@ void ADS1256_Hardware_Reset(ADS1256 *ads)
 	while ((ads->rdyPort->IDR & ads->rdyPin) != 0);
 }
 
+/**
+ *  HAL_StatusTypeDef ADS1256_Software_Synchronize(ADS1256 *ads)
+ * 
+ *  Issue a software SYNC command to 
+ *  the connected ADS1256 and issue a WAKEUP
+ *  command after 24 master clock periods.
+ * 
+ *  Returns a HAL_StatusTypeDef
+*/
+HAL_StatusTypeDef ADS1256_Software_Synchronize(ADS1256 *ads)
+{
+    HAL_StatusTypeDef status;
+
+    // Issue a SYNC/WAKEUP command to restart conversion process
+    status = ADS1256_Send_Command(ads, SYNC_CMD);
+    if (status != HAL_OK) return status;
+    
+    DWT_Delay_us(4);
+
+    status = ADS1256_Send_Command(ads, WAKEUP_CMD);
+    if (status != HAL_OK) return status;
+
+	// Wait until the DRDY pin is brought low
+	while ((ads->rdyPort->IDR & ads->rdyPin) != 0);
+    
+    return status;
+}
 
 /**
  *  HAL_StatusTypeDef ADS1256_Send_Command(ADS1256 *ads, uint8_t command)
@@ -286,22 +318,15 @@ HAL_StatusTypeDef ADS1256_Set_Mode(ADS1256 *ads, ADS1256_Mode mode)
             // while preserving the current positive input channel
             uint8_t mux = 0x00;
             status = ADS1256_Register_Read(ads, MUX_REG, &mux);
-            if (status != HAL_OK) goto returnStatus;
+            if (status != HAL_OK) return status;
 
             status = ADS1256_Register_Write(ads, MUX_REG, mux & 0xF8);
-            if (status != HAL_OK) goto returnStatus;
+            if (status != HAL_OK) return status;
 
-            // Issue a SYNC/WAKEUP command to restart conversion process
-            status = ADS1256_Send_Command(ads, SYNC_CMD);
-            if (status != HAL_OK) goto returnStatus;
-            
-            DWT_Delay_us(4);
-
-            status = ADS1256_Send_Command(ads, WAKEUP_CMD);
-            if (status != HAL_OK) goto returnStatus;
+            status = ADS1256_Software_Synchronize(ads);
         }
     }
-returnStatus:
+
     return status;
 }
 
@@ -360,12 +385,7 @@ HAL_StatusTypeDef ADS1256_Set_Channel(ADS1256 *ads, ADS1256_Channel pChannel)
     status = ADS1256_Register_Write(ads, MUX_REG, (pChannel << 4) | nChannel);
     if (status != HAL_OK) return status;
 
-    // Issue a SYNC/WAKEUP command to restart conversion process
-    status = ADS1256_Send_Command(ads, SYNC_CMD);
-    if (status != HAL_OK) return status;
-    DWT_Delay_us(4);
-    status = ADS1256_Send_Command(ads, WAKEUP_CMD);
-    if (status != HAL_OK) return status;
+    status = ADS1256_Software_Synchronize(ads);
 
     return status;
 }
