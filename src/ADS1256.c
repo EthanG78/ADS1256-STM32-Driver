@@ -2,7 +2,7 @@
  *      ADS1256 STM32F7 SPI Driver
  * 
  *      Author:     Ethan Garnier
- *      Date:       May 13th, 2024
+ *      Date:       2024
 */
 #include "math.h"
 #include "ADS1256.h"
@@ -17,7 +17,7 @@
  *  is initialized with the following settings:
  *      - Most significant bit first
  *      - Auto-calibration enabled
- *      - Analog input buffer disabled
+ *      - Analog input buffer enabled 
  *      - Sensor detect current source disabled
  *      - Input gain of 1
  *      - Data rate of 30 000 SPS
@@ -58,18 +58,18 @@ HAL_StatusTypeDef ADS1256_Init(ADS1256 *ads, SPI_HandleTypeDef *spiHandle, GPIO_
     //  - Digital clock output disabled
     //  - Sensor detect current source disabled
     //  - Gain of 1
-    status = ADS1256_Register_Write(ads, ADCON_REG, 0x00 | GAIN_1);
+    status = ADS1256_Register_Write(ads, ADCON_REG, ADCON_DEFAULT);
     if (status != HAL_OK) return status;
 
     // Initialize status register with following settings:
     //  - Most significant bit first
     //  - Auto-calibration enabled
-    //  - Analog input buffer disabled
-    status = ADS1256_Register_Write(ads, STATUS_REG, 0b11110101);
+    //  - Analog input buffer enabled 
+    status = ADS1256_Register_Write(ads, STATUS_REG, STATUS_DEFAULT);
     if (status != HAL_OK) return status;
 
     // Initialize data rate register with a data rate of 30 000 sps
-    status = ADS1256_Register_Write(ads, DRATE_REG, DRATE_30K_SPS);
+    status = ADS1256_Register_Write(ads, DRATE_REG, DRATE_DEFAULT);
     if (status != HAL_OK) return status;
 
     // Initialize the ADS1256 in single-ended 
@@ -77,7 +77,7 @@ HAL_StatusTypeDef ADS1256_Init(ADS1256 *ads, SPI_HandleTypeDef *spiHandle, GPIO_
     if (status != HAL_OK) return status;
 
     // Initialize the ADS1256 to use analog input channel 0
-    status = ADS1256_Set_Channel(ads, CHANNEL_AIN0);
+    status = ADS1256_Set_Channel(ads, CHANNEL_AIN0); // might be able to get rid of this call?
     if (status != HAL_OK) return status;
 
     // Verify the configuration of the above registers
@@ -101,26 +101,26 @@ HAL_StatusTypeDef ADS1256_Verify_Config(ADS1256 *ads)
     //  - Sensor detect current source disabled
     //  - Gain of 1
 	status = ADS1256_Register_Read(ads, ADCON_REG, &regBits);
-	if (status != HAL_OK || regBits != 0x00) return HAL_ERROR;
+	if (status != HAL_OK || regBits != ADCON_DEFAULT) return HAL_ERROR;
 
 	// Read the contents of the STATUS register and
 	// verify they are configured with:
     //  - Most significant bit first
     //  - Auto-calibration enabled
-    //  - Analog input buffer disabled
+    //  - Analog input buffer enabled 
 	status = ADS1256_Register_Read(ads, STATUS_REG, &regBits);
-	if (status != HAL_OK || (regBits & 0x0E) != 0x04) return HAL_ERROR;
+	if (status != HAL_OK || (regBits & 0x0E) != STATUS_DEFAULT) return HAL_ERROR;
 
 	// Read the contents of the DRATE register and
 	// verify they are configured with a data rate of 30k sps
 	status = ADS1256_Register_Read(ads, DRATE_REG, &regBits);
-	if (status != HAL_OK || regBits != DRATE_30K_SPS) return HAL_ERROR;
+	if (status != HAL_OK || regBits != DRATE_DEFAULT) return HAL_ERROR;
 
 	// Read the contents of the MUX register and
 	// verify that the ADS1256 is configured using
 	// channels AIN0 and AINCOM
 	status = ADS1256_Register_Read(ads, MUX_REG, &regBits);
-	if (status != HAL_OK || (regBits & 0xF8) != 0x08) return HAL_ERROR;
+	if (status != HAL_OK || (regBits & 0xF8) != MUX_DEFAULT) return HAL_ERROR;
 
 	return HAL_OK;
 }
@@ -286,7 +286,7 @@ HAL_StatusTypeDef ADS1256_Set_Mode(ADS1256 *ads, ADS1256_Mode mode)
             // while preserving the current positive input channel
             uint8_t mux = 0x00;
             status = ADS1256_Register_Read(ads, MUX_REG, &mux);
-            status = ADS1256_Register_Write(ads, MUX_REG, mux & 0x8);
+            status = ADS1256_Register_Write(ads, MUX_REG, mux & 0xF8);
         }
     }
 
@@ -395,16 +395,17 @@ HAL_StatusTypeDef ADS1256_Read_ID(ADS1256 *ads, uint8_t *id)
 }
 
 /**
- *  HAL_StatusTypeDef ADS1256_Read_Data(ADS1256 *ads, uint8_t *inBuffer)
+ *  HAL_StatusTypeDef ADS1256_Read_Data(ADS1256 *ads, uint32_t outputCode)
  * 
  *  Read the latest 24-bit conversion result from the ADS1256 into
- *  the inBuffer byte array. inBuffer must be able to hold 24 bits.
+ *  the outputCode 32 bit unsigned integer
  * 
  *  Returns a HAL_StatusTypeDef.
 */
-HAL_StatusTypeDef ADS1256_Read_Data(ADS1256 *ads, uint8_t *inBuffer)
+HAL_StatusTypeDef ADS1256_Read_Data(ADS1256 *ads, uint32_t *outputCode)
 {
     HAL_StatusTypeDef status;
+    uint8_t inBuffer[3];
 
     // Wait until the DRDY pin is brought low 
     while ((ads->rdyPort->IDR & ads->rdyPin) != 0);
@@ -441,9 +442,13 @@ HAL_StatusTypeDef ADS1256_Read_Data(ADS1256 *ads, uint8_t *inBuffer)
     status = SPI_Receive_Byte(ads->spiHandle, &inBuffer[0]);
     status = SPI_Receive_Byte(ads->spiHandle, &inBuffer[1]);
     status = SPI_Receive_Byte(ads->spiHandle, &inBuffer[2]);
-
-    // Change the polarity of SPI clock back to falling edge
-    // ads->spiHandle->Instance->CR1 |= 0x0001;
+    
+    // Convert the 3 bytes captured from the ADS1256 into
+    // a single 24 bit value.
+    *outputCode = (((data[0] & 0x80) ? 0xFF : 0x00) << 24) |
+                                ((uint32_t)data[0] << 16) |       
+                                ((uint32_t)data[1] << 8) |
+                                data[2];
 
 endRead:
     // Bring the chip select line high
@@ -463,12 +468,11 @@ endRead:
 HAL_StatusTypeDef ADS1256_Read_Voltage(ADS1256 *ads, float *voltage)
 {
     HAL_StatusTypeDef status;
-    uint8_t data[3];
     uint8_t PGA, PGAReg;
     uint32_t outputCode;
 
     // Read the current conversion result
-    status = ADS1256_Read_Data(ads, &data[0]);
+    status = ADS1256_Read_Data(ads, &outputCode);
     if (status != HAL_OK) return HAL_ERROR;
 
     // Read the contents of the ADCON register to get the current
@@ -478,25 +482,10 @@ HAL_StatusTypeDef ADS1256_Read_Voltage(ADS1256 *ads, float *voltage)
     PGA = pow(2, (PGAReg & 0x07));
     if (PGA > 64) PGA = 64;
 
-
-    // TODO: Test:
-    // Convert the 3 bytes captured from the ADS1256 into
-    // a single 24 bit value.
-    outputCode = (((data[0] & 0x80) ? 0xFF : 0x00) << 24) |
-                                ((uint32_t)data[0] << 16) |       
-                                ((uint32_t)data[1] << 8) |
-                                data[2];
-    /*outputCode = ((uint32_t)data[0] << 16) & 0x00FF0000;
-    outputCode |= ((uint32_t)data[1] << 8);
-    outputCode |= data[2];
-
-    // Handling negative values
-    if (outputCode & 0x800000) outputCode &= 0xFF000000;*/
-
     // Calculate the input analog voltage from the output code,
     // the reference voltage, the number of code words, and the 
     // programmable gain.
-    unsigned long denom = (unsigned long)PGA * BIT_RANGE;
+    unsigned long denom = (unsigned long)PGA * (unsigned long)BIT_RANGE;
     unsigned long numer = (unsigned long)VREF * outputCode;
     *voltage = (float)numer / denom;
 

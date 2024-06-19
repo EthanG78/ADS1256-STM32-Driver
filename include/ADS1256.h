@@ -2,7 +2,7 @@
  *      ADS1256 STM32F7 SPI Driver
  * 
  *      Author:     Ethan Garnier
- *      Date:       May 13th, 2024
+ *      Date:       2024
 */
 #ifndef ADS1256_SPI_DRIVER_H
 #define ADS1256_SPI_DRIVER_H
@@ -10,10 +10,19 @@
 #include "stm32f7xx_hal.h" /* Needed for structure defs */
 #include "stdint.h"
 
-#define ADS1256_ID 3
-#define VREF 5
-#define BIT_RANGE 8388607UL
+#define ADS1256_ID      3
+#define VREF            5
+#define BIT_RANGE       0x7FFFFF
+#define MASTER_CLK      7680000UL
 
+/* Default register values for initialization */
+typedef enum
+{
+    ADCON_DEFAULT   =   0x00,   /* CLKOUT: Disabled, SDCS: Disabled, PGA: 1 */
+    STATUS_DEFAULT  =   0x06,   /* ORDER: MSB, ACAL: Enabled, BUFEN: Enabled */
+    DRATE_DEFAULT   =   0xF0,   /* 30k Samples per Second */
+    MUX_DEFAULT     =   0x08,   /* AINp: AIN0, AINb: AINCOM */
+} ADS1256_Register_Defaults;
 
 /* ADS1256 Register Addresses */
 typedef enum
@@ -38,10 +47,10 @@ typedef enum
     RDATA_CMD       =   0x01,
     RDATAC_CMD      =   0x03,
     SDATAC_CMD      =   0x0F,
-    RREG_CMD_1      =   0x10,    /* low 4 bits are reg address to read*/
-    RREG_CMD_2      =   0x00,    /* low 4 bits are number regs to read - 1*/
-    WREG_CMD_1      =   0x50,    /* low 4 bits are reg address to write*/
-    WREG_CMD_2      =   0x00,    /* low 4 bits are number regs to write - 1*/
+    RREG_CMD_1      =   0x10,   /* low 4 bits are reg address to read*/
+    RREG_CMD_2      =   0x00,   /* low 4 bits are number regs to read - 1*/
+    WREG_CMD_1      =   0x50,   /* low 4 bits are reg address to write*/
+    WREG_CMD_2      =   0x00,   /* low 4 bits are number regs to write - 1*/
     SELFCAL_CMD     =   0xF0,
     SELFOCAL_CMD    =   0xF1,
     SELFGCAL_CMD    =   0xF2,
@@ -141,6 +150,6 @@ HAL_StatusTypeDef ADS1256_Set_Mode(ADS1256 *ads, ADS1256_Mode mode);
 HAL_StatusTypeDef ADS1256_Set_Channel(ADS1256 *ads, ADS1256_Channel pChannel);
 HAL_StatusTypeDef ADS1256_Self_Cal(ADS1256 *ads);
 HAL_StatusTypeDef ADS1256_Read_ID(ADS1256 *ads, uint8_t *id);
-HAL_StatusTypeDef ADS1256_Read_Data(ADS1256 *ads, uint8_t *inBuffer);
+HAL_StatusTypeDef ADS1256_Read_Data(ADS1256 *ads, uint32_t *outputCode)
 HAL_StatusTypeDef ADS1256_Read_Voltage(ADS1256 *ads, float *voltage);
 #endif
