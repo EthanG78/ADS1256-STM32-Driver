@@ -445,10 +445,10 @@ HAL_StatusTypeDef ADS1256_Read_Data(ADS1256 *ads, uint32_t *outputCode)
     
     // Convert the 3 bytes captured from the ADS1256 into
     // a single 24 bit value.
-    *outputCode = (((data[0] & 0x80) ? 0xFF : 0x00) << 24) |
-                                ((uint32_t)data[0] << 16) |       
-                                ((uint32_t)data[1] << 8) |
-                                data[2];
+    *outputCode = (((inBuffer[0] & 0x80) ? 0xFF : 0x00) << 24) |
+                                ((uint32_t)inBuffer[0] << 16) |       
+                                ((uint32_t)inBuffer[1] << 8) |
+                                inBuffer[2];
 
 endRead:
     // Bring the chip select line high

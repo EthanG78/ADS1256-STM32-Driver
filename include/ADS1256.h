@@ -150,6 +150,6 @@ HAL_StatusTypeDef ADS1256_Set_Mode(ADS1256 *ads, ADS1256_Mode mode);
 HAL_StatusTypeDef ADS1256_Set_Channel(ADS1256 *ads, ADS1256_Channel pChannel);
 HAL_StatusTypeDef ADS1256_Self_Cal(ADS1256 *ads);
 HAL_StatusTypeDef ADS1256_Read_ID(ADS1256 *ads, uint8_t *id);
-HAL_StatusTypeDef ADS1256_Read_Data(ADS1256 *ads, uint32_t *outputCode)
+HAL_StatusTypeDef ADS1256_Read_Data(ADS1256 *ads, uint32_t *outputCode);
 HAL_StatusTypeDef ADS1256_Read_Voltage(ADS1256 *ads, float *voltage);
 #endif
