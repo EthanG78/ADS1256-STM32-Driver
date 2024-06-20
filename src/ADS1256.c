@@ -560,9 +560,6 @@ HAL_StatusTypeDef ADS1256_Read_Continuous(ADS1256 *ads, uint32_t outputArrSize, 
     uint32_t sampleIdx = 0, outputCode = 0;
     while (sampleIdx < outputArrSize && status == HAL_OK)
     {
-        // Wait until DRDY is low before we read the latest result
-        while ((ads->rdyPort->IDR & ads->rdyPin) != 0);
-
         // Bring the chip select line low
         ads->csPort->BSRR = (uint32_t)ads->csPin << 16;
 
@@ -583,7 +580,13 @@ HAL_StatusTypeDef ADS1256_Read_Continuous(ADS1256 *ads, uint32_t outputArrSize, 
 
         // Store the 24 bit value in the provided buffer
         outputArr[sampleIdx++] = outputCode;
+        
+        // Wait until DRDY is low before we read the latest result
+        while ((ads->rdyPort->IDR & ads->rdyPin) != 0);
     }
+
+    // Issue the stop command
+    status = ADS1256_Send_Command(ads, SDATAC_CMD);
 
 ret_status:
     return status;
