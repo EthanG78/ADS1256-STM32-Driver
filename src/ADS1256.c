@@ -69,7 +69,7 @@ HAL_StatusTypeDef ADS1256_Init(ADS1256 *ads, SPI_HandleTypeDef *spiHandle, GPIO_
     if (status != HAL_OK) return status;
 
     // Wait for auto-calibration to finish
-    HAL_delay(1);
+    HAL_Delay(1);
 
     // Initialize data rate register with a data rate of 30 000 sps
     status = ADS1256_Register_Write(ads, DRATE_REG, DRATE_DEFAULT);
@@ -522,4 +522,160 @@ HAL_StatusTypeDef ADS1256_Read_Voltage(ADS1256 *ads, float *voltage)
     *voltage = (float)numer / denom;
 
     return HAL_OK;
+}
+
+/**
+ *  HAL_StatusTypeDef ADS1256_Read_Continuous(ADS1256 *ads, uint32_t outputArrSize, uint32_t *outputArr)
+ *  
+ *  Continuously read conversion results from the supplied ADS1256 using the
+ *  read data continuous (RDATAC) command at the data rate that the ADS1256
+ *  is currently configured with. Each conversion result read will be stored
+ *  in the provided outputArr buffer of size outputArrSize. Once OutputArrSize conversion
+ *  results have been read, reading will finish and the function will return.
+ * 
+ *  NOTE: Do not use this command if the DIN and DOUT pins of the ADS1256
+ *  are connected together. This is because the device will constantly
+ *  be monitoring the DIN line for the STOPC/RESET command while continuously converting.
+ * 
+ *  Returns a HAL_StatusTypeDef.
+ */
+HAL_StatusTypeDef ADS1256_Read_Continuous(ADS1256 *ads, uint32_t outputArrSize, uint32_t *outputArr)
+{
+    HAL_StatusTypeDef status = HAL_ERROR;
+
+    if (ads == NULL || outputArrSize == 0 || outputArr == NULL) goto ret_status;
+
+    // Synchronize the ADS1256 to send DRDY low
+    status = ADS1256_Software_Synchronize(ads);
+    if (status != HAL_OK) goto ret_status;
+
+    // Initiate continuous reading from the ADS1256
+    status = ADS1256_Send_Command(ads, RDATAC_CMD);
+    if (status != HAL_OK) goto ret_status;
+
+    // Wait 50 CLKIN periods (assuming CLKIN = 7.68 MHz this would be 6.51 us)
+    DWT_Delay_us(7);
+
+    uint8_t inBuffer[3];
+    uint32_t sampleIdx = 0, outputCode = 0;
+    while (sampleIdx < outputArrSize && status == HAL_OK)
+    {
+        // Wait until DRDY is low before we read the latest result
+        while ((ads->rdyPort->IDR & ads->rdyPin) != 0);
+
+        // Bring the chip select line low
+        ads->csPort->BSRR = (uint32_t)ads->csPin << 16;
+
+        // Capture the latest 3 bytes on DOUT
+        status = SPI_Receive_Byte(ads->spiHandle, &inBuffer[0]);
+        status = SPI_Receive_Byte(ads->spiHandle, &inBuffer[1]);
+        status = SPI_Receive_Byte(ads->spiHandle, &inBuffer[2]);
+        
+        // Bring the chip select line high
+        ads->csPort->BSRR = ads->csPin;
+        
+        // Convert the 3 bytes captured from the ADS1256 into
+        // a single 24 bit value.
+        outputCode = (((inBuffer[0] & 0x80) ? 0xFF : 0x00) << 24) |
+                                    ((uint32_t)inBuffer[0] << 16) |       
+                                    ((uint32_t)inBuffer[1] << 8) |
+                                    inBuffer[2];
+
+        // Store the 24 bit value in the provided buffer
+        outputArr[sampleIdx++] = outputCode;
+    }
+
+ret_status:
+    return status;
+}
+
+/**
+ *  HAL_StatusTypeDef ADS1256_Read_Dual_Channel(ADS1256 *ads, ADS1256_Channel channel1, uint32_t *channel1Output, ADS1256_Channel channel2, uint32_t *channel2Output)
+ *  
+ *  Read the single-ended conversion results (AINn is AINCOM) of two different
+ *  channels, channel1 and channel2, and store the results in channel1Output and
+ *  channel2Output, respectively. This function follows the procedure for
+ *  multiplexer cycling specified on page 21 of the ADS1256 datasheet.
+ * 
+ *  Returns a HAL_StatusTypeDef.
+ */
+HAL_StatusTypeDef ADS1256_Read_Dual_Channel(ADS1256 *ads, ADS1256_Channel channel1, uint32_t *channel1Output, ADS1256_Channel channel2, uint32_t *channel2Output)
+{
+    HAL_StatusTypeDef status = HAL_ERROR;
+    uint8_t inBuffer[3];
+
+    // This function is meant for single-ended operation
+    if (ads == NULL || ads->mode != MODE_SINGLE_ENDED) goto ret_status;
+
+    // Set the MUX register to use channel1
+    status = ADS1256_Set_Channel(ads, channel1);
+    if (status != HAL_OK) goto ret_status;
+
+    // Issue the initial RDATA command for channel1
+    status = ADS1256_Send_Command(ads, RDATA_CMD);
+    if (status != HAL_OK) goto ret_status;
+
+	// Wait until the DRDY pin is brought low
+	while ((ads->rdyPort->IDR & ads->rdyPin) != 0);
+
+    // When data is available for channel1, update the MUX register
+    // to channel2 BEFORE we read whats on DOUT to allow the ADS1256
+    // to start measure the new input channel sooner
+    status = ADS1256_Register_Write(ads, MUX_REG, (channel2 << 4) | CHANNEL_AINCOM);
+    if (status != HAL_OK) return status;
+
+    // Issue SYNC, WAKEUP, and RDATA command for channel 2
+    status = ADS1256_Send_Command(ads, SYNC_CMD);
+    if (status != HAL_OK) return status;
+    
+    DWT_Delay_us(4);
+
+    status = ADS1256_Send_Command(ads, WAKEUP_CMD);
+    if (status != HAL_OK) return status;
+
+    status = ADS1256_Send_Command(ads, RDATA_CMD);
+    if (status != HAL_OK) goto ret_status;
+
+    // Once MUX has been updated, now we read channel1's results
+    // Bring the chip select line low
+    ads->csPort->BSRR = (uint32_t)ads->csPin << 16;
+
+    // Capture the latest 3 bytes on DOUT
+    status = SPI_Receive_Byte(ads->spiHandle, &inBuffer[0]);
+    status = SPI_Receive_Byte(ads->spiHandle, &inBuffer[1]);
+    status = SPI_Receive_Byte(ads->spiHandle, &inBuffer[2]);
+    
+    // Bring the chip select line high
+    ads->csPort->BSRR = ads->csPin;
+
+    // Convert the 3 bytes captured from the ADS1256 into
+    // a single 24 bit value.
+    *channel1Output = (((inBuffer[0] & 0x80) ? 0xFF : 0x00) << 24) |
+                                ((uint32_t)inBuffer[0] << 16) |       
+                                ((uint32_t)inBuffer[1] << 8) |
+                                inBuffer[2];
+
+	// Wait until the DRDY pin is brought low (again)
+	while ((ads->rdyPort->IDR & ads->rdyPin) != 0);
+
+    // Capture the conversion results for channel 2
+    // Bring the chip select line low
+    ads->csPort->BSRR = (uint32_t)ads->csPin << 16;
+
+    // Capture the latest 3 bytes on DOUT
+    status = SPI_Receive_Byte(ads->spiHandle, &inBuffer[0]);
+    status = SPI_Receive_Byte(ads->spiHandle, &inBuffer[1]);
+    status = SPI_Receive_Byte(ads->spiHandle, &inBuffer[2]);
+    
+    // Bring the chip select line high
+    ads->csPort->BSRR = ads->csPin;
+
+    // Convert the 3 bytes captured from the ADS1256 into
+    // a single 24 bit value.
+    *channel2Output = (((inBuffer[0] & 0x80) ? 0xFF : 0x00) << 24) |
+                                ((uint32_t)inBuffer[0] << 16) |       
+                                ((uint32_t)inBuffer[1] << 8) |
+                                inBuffer[2];
+ret_status:
+    return status;
 }
