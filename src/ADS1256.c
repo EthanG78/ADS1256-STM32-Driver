@@ -610,40 +610,36 @@ HAL_StatusTypeDef ADS1256_Read_Dual_Channel(ADS1256 *ads, ADS1256_Channel channe
     // This function is meant for single-ended operation
     if (ads == NULL || ads->mode != MODE_SINGLE_ENDED) goto ret_status;
 
-    // Set the MUX register to use channel1
+    // Set the MUX register to use channel1. This function will
+    // not return until DRDY goes low.
     status = ADS1256_Set_Channel(ads, channel1);
     if (status != HAL_OK) goto ret_status;
 
-    // Issue the initial RDATA command for channel1
-    status = ADS1256_Send_Command(ads, RDATA_CMD);
-    if (status != HAL_OK) goto ret_status;
-
-	// Wait until the DRDY pin is brought low
-	while ((ads->rdyPort->IDR & ads->rdyPin) != 0);
-
     // When data is available for channel1, update the MUX register
-    // to channel2 BEFORE we read whats on DOUT to allow the ADS1256
+    // to channel2 BEFORE we read whatever is on DOUT to allow the ADS1256
     // to start measure the new input channel sooner
     status = ADS1256_Register_Write(ads, MUX_REG, (channel2 << 4) | CHANNEL_AINCOM);
     if (status != HAL_OK) return status;
 
     // Issue SYNC, WAKEUP, and RDATA command for channel 2
     status = ADS1256_Send_Command(ads, SYNC_CMD);
-    if (status != HAL_OK) return status;
-    
-    DWT_Delay_us(4);
-
-    status = ADS1256_Send_Command(ads, WAKEUP_CMD);
-    if (status != HAL_OK) return status;
-
-    status = ADS1256_Send_Command(ads, RDATA_CMD);
     if (status != HAL_OK) goto ret_status;
 
-    // Once MUX has been updated, now we read channel1's results
+    status = ADS1256_Send_Command(ads, WAKEUP_CMD);
+    if (status != HAL_OK) goto ret_status;
+
+    // Now read data from Channel1
+
     // Bring the chip select line low
     ads->csPort->BSRR = (uint32_t)ads->csPin << 16;
 
-    // Capture the latest 3 bytes on DOUT
+    // Issue the initial RDATA command for channel1
+    status = SPI_Transmit_Byte(ads->spiHandle, RDATA_CMD);
+    if (status != HAL_OK) goto ret_status;
+
+    // Wait 50 CLKIN periods (assuming CLKIN = 7.68 MHz this would be 6.51 us)
+    DWT_Delay_us(7);
+    status = SPI_Receive_Bytes(ads->spiHandle, 3, inBuffer);
     status = SPI_Receive_Byte(ads->spiHandle, &inBuffer[0]);
     status = SPI_Receive_Byte(ads->spiHandle, &inBuffer[1]);
     status = SPI_Receive_Byte(ads->spiHandle, &inBuffer[2]);
@@ -665,13 +661,19 @@ HAL_StatusTypeDef ADS1256_Read_Dual_Channel(ADS1256 *ads, ADS1256_Channel channe
     // Bring the chip select line low
     ads->csPort->BSRR = (uint32_t)ads->csPin << 16;
 
-    // Capture the latest 3 bytes on DOUT
+    // Issue the initial RDATA command for channel1
+    status = SPI_Transmit_Byte(ads->spiHandle, RDATA_CMD);
+    if (status != HAL_OK) goto ret_status;
+
+    // Wait 50 CLKIN periods (assuming CLKIN = 7.68 MHz this would be 6.51 us)
+    DWT_Delay_us(7);
+    status = SPI_Receive_Bytes(ads->spiHandle, 3, inBuffer);
     status = SPI_Receive_Byte(ads->spiHandle, &inBuffer[0]);
     status = SPI_Receive_Byte(ads->spiHandle, &inBuffer[1]);
     status = SPI_Receive_Byte(ads->spiHandle, &inBuffer[2]);
-    
-    // Bring the chip select line high
-    ads->csPort->BSRR = ads->csPin;
+
+	// Bring the chip select line high
+	ads->csPort->BSRR = ads->csPin;
 
     // Convert the 3 bytes captured from the ADS1256 into
     // a single 24 bit value.
