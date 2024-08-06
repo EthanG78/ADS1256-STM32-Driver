@@ -202,7 +202,7 @@ HAL_StatusTypeDef ADS1256_Send_Command(ADS1256 *ads, ADS1256_Command command)
 
     // Based on the command, we must wait either 24 CLKIN periods
     // or until the DRDY line goes low before we can allow another command
-    if (command & (RREG_CMD_1 | RREG_CMD_2 | WREG_CMD_1 | WREG_CMD_2 | RDATA_CMD | RDATAC_CMD | RESET_CMD | SYNC_CMD))
+    if (command & (RREG_CMD_1 | RREG_CMD_2 | WREG_CMD_1 | WREG_CMD_2 | RDATA_CMD | RDATAC_CMD | RESET_CMD | SYNC_CMD | WAKEUP_CMD))
     {
         // Wait 24 CLKIN periods (3.125 us)
         DWT_Delay_us(4);
@@ -554,7 +554,7 @@ HAL_StatusTypeDef ADS1256_Read_Continuous(ADS1256 *ads, uint32_t outputArrSize, 
     if (status != HAL_OK) goto ret_status;
 
     // Wait 50 CLKIN periods (assuming CLKIN = 7.68 MHz this would be 6.51 us)
-    DWT_Delay_us(7);
+    HAL_Delay(1);
 
     uint8_t inBuffer[3];
     uint32_t sampleIdx = 0, outputCode = 0;
@@ -564,6 +564,7 @@ HAL_StatusTypeDef ADS1256_Read_Continuous(ADS1256 *ads, uint32_t outputArrSize, 
         ads->csPort->BSRR = (uint32_t)ads->csPin << 16;
 
         // Capture the latest 3 bytes on DOUT
+	status = SPI_Receive_Bytes(ads->spiHandle, 3, inBuffer);
         status = SPI_Receive_Byte(ads->spiHandle, &inBuffer[0]);
         status = SPI_Receive_Byte(ads->spiHandle, &inBuffer[1]);
         status = SPI_Receive_Byte(ads->spiHandle, &inBuffer[2]);
