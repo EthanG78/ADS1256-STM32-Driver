@@ -160,11 +160,5 @@ HAL_StatusTypeDef ADS1256_Self_Cal (ADS1256 *ads);
 HAL_StatusTypeDef ADS1256_Read_ID (ADS1256 *ads, uint8_t *id);
 HAL_StatusTypeDef ADS1256_Read_Data (ADS1256 *ads, uint32_t *outputCode);
 HAL_StatusTypeDef ADS1256_Read_Voltage (ADS1256 *ads, float *voltage);
-HAL_StatusTypeDef
-ADS1256_Read_Continuous (ADS1256 *ads, uint32_t outputArrSize, uint32_t *outputArr);
-HAL_StatusTypeDef ADS1256_Read_Dual_Channel (ADS1256 *ads,
-                                             ADS1256_Channel channel1,
-                                             uint32_t *channel1Output,
-                                             ADS1256_Channel channel2,
-                                             uint32_t *channel2Output);
+
 #endif
