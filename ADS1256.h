@@ -11,7 +11,7 @@
 #include "stm32f7xx_hal.h" /* Needed for structure defs */
 
 #define ADS1256_ID 3
-#define VREF 5
+#define VREF 2.5
 #define BIT_RANGE 0x7FFFFF
 #define MASTER_CLK 7680000UL
 

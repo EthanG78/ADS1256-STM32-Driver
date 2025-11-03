@@ -780,7 +780,7 @@ ADS1256_Read_Voltage (ADS1256 *ads, float *voltage)
     // the reference voltage, the number of code words, and the
     // programmable gain.
     unsigned long denom = (unsigned long)PGA * (unsigned long)BIT_RANGE;
-    unsigned long numer = (unsigned long)VREF * outputCode;
+    unsigned long numer = 2 * (unsigned long)VREF * outputCode;
     *voltage = (float)numer / denom;
 
     return HAL_OK;
